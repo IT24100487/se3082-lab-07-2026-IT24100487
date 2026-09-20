@@ -1,0 +1,66 @@
+Lab 07 - Exercise 7: Summary Comparison
+=========================================
+
+1. Comparison Table
+--------------------
+
+Program        | Collectives Used              | Array Allocation                          | Manual Sum Needed? | Result Available On
+----------------|-------------------------------|--------------------------------------------|---------------------|----------------------------
+sum_bcast       | MPI_Bcast + Send/Recv         | Every process allocates the FULL array      | Yes (root loops Recv) | Root only
+sum_scatter     | MPI_Scatter + Send/Recv       | Only root allocates full array; others chunk| Yes (root loops Recv) | Root only
+sum_gather      | MPI_Scatter + MPI_Gather      | Root full array, others chunk only          | Yes (root loops all_sums[]) | Root only
+sum_reduce      | MPI_Scatter + MPI_Reduce      | Root full array, others chunk only          | No (MPI_SUM does it)  | Root only
+sum_allreduce   | MPI_Scatter + MPI_Allreduce   | Root full array, others chunk only          | No                     | All processes
+sum_scan        | MPI_Scatter + MPI_Scan        | Root full array, others chunk only          | No                     | Different per rank (cumulative)
+
+
+2. Timing Table (seconds)
+--------------------------
+
+Program        |  NP=2   |  NP=4   |  NP=8
+----------------|---------|---------|---------
+sum_bcast       | 0.0030  | 0.0076  | 0.0060
+sum_scatter     | 0.0038  | 0.0034  | 0.0015
+sum_gather      | 0.0031  | 0.0034  | 0.0015
+sum_reduce      | 0.0031  | 0.0034  | 0.0031
+sum_allreduce   | 0.0032  | 0.0059  | 0.0055
+sum_scan        | 0.0067  | 0.0118  | 0.0064
+
+Full raw output for all 18 runs (6 programs x NP=2,4,8) is in exercise7_raw_output.txt
+in this folder.
+
+Analysis:
+sum_scatter, sum_gather, and sum_reduce are consistently the fastest programs, and
+their times actually improve as the process count rises (about 0.003s down to
+0.0015s at NP=8). This is because each process only receives and sums its own
+chunk of the array, and that chunk gets smaller as more processes share the work.
+
+sum_bcast stays comparatively slow because MPI_Bcast sends the ENTIRE 1,000,000
+element array to every single process, regardless of how many processes there
+are. That communication cost does not shrink as process count increases the way
+the scatter-based programs' per-process chunk does.
+
+sum_allreduce and sum_scan cost a bit more than plain sum_reduce because they do
+extra work. MPI_Allreduce is effectively MPI_Reduce plus a broadcast of the
+result back to every process, and MPI_Scan cannot be collapsed into a single
+tree-reduction the way a plain sum can, since every process gets a different
+cumulative value rather than one shared total.
+
+
+3. Thinking Question
+----------------------
+In what situation would you choose MPI_Scan over MPI_Allreduce?
+
+MPI_Scan is the right choice when each process needs to know its OWN POSITION
+relative to the others - a running or cumulative value - rather than just the
+final total that MPI_Allreduce gives identically to everyone.
+
+Concrete example: Suppose 8 processes are each writing a different number of
+records into a shared output file or array. Running MPI_Scan on each process's
+record count gives every process the exact offset it should start writing at
+(prefix_sum - local_count = sum_before_me). All 8 processes can then write to
+the file in parallel with zero extra communication, because no process needs
+to ask another "how many records did you write?" before it can figure out
+where its own section begins. MPI_Allreduce could not do this, since it would
+only tell every process the grand total record count, not each process's
+individual starting offset.
